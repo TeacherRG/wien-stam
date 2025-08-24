@@ -669,7 +669,7 @@
         let currentDate = new Date('2025-08-01');
         let bookingsData = [];
         const ADMIN_PASSWORD = 'tefillin2025';
-
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxoahujdUthOZrGa1xD_aTsuHhLkL8iWgKfcAnpjHXbrGoSZCPVAB8JDSaexVwsr-zJ/exec';
         function formatDate(dateString) {
             const date = new Date(dateString);
             const options = { 
@@ -894,7 +894,19 @@
             document.getElementById('submitBtn').disabled = true;
         }
 
-        async function simulateBooking(data) {
+           async function simulateBooking(data) {
+            const response = await fetch(SCRIPT_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+    
+            const result = await response.json();
+            if (!result.ok) {
+                throw new Error(result.error || 'Ошибка бронирования');
+            }
+    
+    // Добавляем в локальные данные для админ-панели
             bookingsData.push({
                 id: Date.now(),
                 bookingDate: new Date(),
@@ -906,7 +918,24 @@
                 notes: data.notes,
                 status: 'confirmed'
             });
-            await new Promise(resolve => setTimeout(resolve, 2000));
+    
+            return result;
+        }
+        async function loadBookedSlots() {
+            try {
+                const response = await fetch(SCRIPT_URL);
+                const data = await response.json();
+                if (data.ok && data.bookedSlots) {
+            // Отметить слоты как занятые
+                    data.bookedSlots.forEach(slot => {
+                        const slotObj = timeSlots.find(s => s.date === slot.date && s.time === slot.time);
+                        if (slotObj) slotObj.booked = true;
+                    });
+                    console.log(`Загружено ${data.bookedSlots.length} занятых слотов`);
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки слотов:', error);
+            }
         }
 
         function openAdminPanel() {
@@ -988,7 +1017,10 @@
             }, 10000);
         }
 
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
+            // Загружаем занятые слоты с сервера
+            await loadBookedSlots();
+    
             createCalendar();
             setupCalendarNavigation();
             document.getElementById('submitBtn').disabled = true;
