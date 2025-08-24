@@ -29,7 +29,7 @@
             max-width: 500px;
             width: 100%;
             animation: slideUp 0.6s ease-out;
-            overflow: hidden; /* добавлено для предотвращения выхода дочерних элементов */
+            overflow: hidden;
         }
 
         @keyframes slideUp {
@@ -136,7 +136,6 @@
             border: 2px solid #e2e8f0;
             width: 100%;
             box-sizing: border-box;
-            /* Добавлено ограничение ширины, чтобы не выходить за пределы контейнера */
             max-width: 100%;
             min-width: 0;
             overflow-x: auto;
@@ -476,36 +475,30 @@
 
         @media (max-width: 600px) {
             .container {
-                padding: 30px 5px;
-                margin: 5px;
+                padding: 30px 15px;
+                margin: 10px;
             }
             .calendar {
-                padding: 5px;
+                padding: 10px;
                 gap: 4px;
-                font-size: 13px;
             }
             .calendar-header {
-                padding: 0 2px;
-                font-size: 14px;
+                padding: 0 5px;
             }
             .calendar-day, .calendar-day-header {
-                font-size: 13px;
-                min-width: 0;
-                padding: 2px;
+                font-size: 12px;
+                min-height: 50px;
             }
             .slot-grid {
                 grid-template-columns: 1fr;
             }
-
             .admin-content {
                 width: 95%;
                 padding: 20px;
             }
-
             .bookings-table {
                 font-size: 14px;
             }
-
             .stats {
                 grid-template-columns: 1fr 1fr;
             }
@@ -639,12 +632,26 @@
     </div>
 
     <script>
-        // Hilfsfunktion: ist Samstag?
+        // ======= CONFIGURATION =======
+        // ВАЖНО: Замените YOUR_SCRIPT_ID_HERE на настоящий ID вашего Google Apps Script
+        // Пример: https://script.google.com/macros/s/AKfycbxoahujdUthOZrGa1xD_aTsuHhLkL8iWgKfcAnpjHXbrGoSZCPVAB8JDSaexVwsr-zJ/exec
+        const GAS_URL = 'https://script.google.com/macros/s/AKfycbxoahujdUthOZrGa1xD_aTsuHhLkL8iWgKfcAnpjHXbrGoSZCPVAB8JDSaexVwsr-zJ/exec';
+        const ADMIN_PASSWORD = 'tefillin2025';
+
+        // Global variables
+        let selectedDate = null;
+        let selectedTime = null;
+        let selectedSlot = null;
+        let currentDate = new Date('2025-08-01');
+        let bookingsData = [];
+        let bookedSet = new Set(); // Format: 'YYYY-MM-DD|HH:mm'
+
+        // Helper function: is Saturday?
         function isSaturday(dateObj) {
-            return dateObj.getDay() === 6; // 0 = Sonntag ... 6 = Samstag
+            return dateObj.getDay() === 6; // 0 = Sunday ... 6 = Saturday
         }
 
-        // Generierung der Slots für den Bereich (12.08.2025–07.09.2025, außer Samstag)
+        // Generate time slots for the period (12.08.2025–07.09.2025, except Saturday)
         function generateTimeSlots() {
             const start = new Date('2025-08-12');
             const end = new Date('2025-09-07');
@@ -663,13 +670,78 @@
 
         const timeSlots = generateTimeSlots();
 
-        let selectedDate = null;
-        let selectedTime = null;
-        let selectedSlot = null;
-        let currentDate = new Date('2025-08-01');
-        let bookingsData = [];
-        const ADMIN_PASSWORD = 'tefillin2025';
-        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxoahujdUthOZrGa1xD_aTsuHhLkL8iWgKfcAnpjHXbrGoSZCPVAB8JDSaexVwsr-zJ/exec';
+        // ======= SERVER INTEGRATION =======
+        // Load all bookings from Google Sheets (GET ?list=1)
+        async function fetchBookingsFromServer() {
+            try {
+                const response = await fetch(GAS_URL + '?list=1');
+                const data = await response.json();
+                
+                if (data.ok && data.rows) {
+                    // Update bookedSet based on server data
+                    bookedSet = new Set(
+                        data.rows
+                            .filter(r => r.visit_date && r.visit_time)
+                            .map(r => `${String(r.visit_date).slice(0,10)}|${String(r.visit_time)}`)
+                    );
+                    
+                    // Update bookingsData for admin panel
+                    bookingsData = data.rows.map(row => ({
+                        name: row.name || '',
+                        email: row.email || '',
+                        phone: row.phone || '',
+                        notes: row.notes || '',
+                        visitDate: row.visit_date || '',
+                        visitTime: row.visit_time || '',
+                        bookingDate: new Date(row.timestamp || Date.now())
+                    }));
+                }
+            } catch (error) {
+                console.error('Error loading bookings from server:', error);
+            }
+        }
+
+        // Sync booked status into timeSlots array
+        function syncBookedIntoTimeSlots() {
+            timeSlots.forEach(slot => {
+                const key = `${slot.date}|${slot.time}`;
+                slot.booked = bookedSet.has(key);
+            });
+        }
+
+        // Save booking to Google Sheets (POST)
+        async function saveBookingToServer(formData) {
+            const payload = {
+                name: formData.name,
+                email: formData.email,
+                phone: formData.phone,
+                notes: formData.notes,
+                visit_date: formData.selectedSlot.date,
+                visit_time: formData.selectedSlot.time,
+                timestamp: new Date().toISOString()
+            };
+
+            const response = await fetch(GAS_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+            if (!result.ok) {
+                throw new Error(result.error || 'Save error');
+            }
+            return result;
+        }
+
+        // Refresh from server: fetch bookings, sync slots, redraw calendar
+        async function refreshFromServer() {
+            await fetchBookingsFromServer();
+            syncBookedIntoTimeSlots();
+            createCalendar();
+        }
+
+        // ======= DATE/TIME FORMATTING =======
         function formatDate(dateString) {
             const date = new Date(dateString);
             const options = { 
@@ -686,13 +758,24 @@
             return date.toLocaleDateString('de-DE', options);
         }
 
+        function formatDateTime(date) {
+            return new Date(date).toLocaleString('de-DE', {
+                day: '2-digit',
+                month: '2-digit', 
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        // ======= CALENDAR FUNCTIONS =======
         function getDaysInMonth(date) {
             return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
         }
 
         function getFirstDayOfMonth(date) {
             const firstDay = new Date(date.getFullYear(), date.getMonth(), 1).getDay();
-            return firstDay === 0 ? 6 : firstDay - 1;
+            return firstDay === 0 ? 6 : firstDay - 1; // Convert to Monday = 0
         }
 
         function getSlotsForDate(dateString) {
@@ -705,6 +788,7 @@
             monthLabel.textContent = formatMonth(currentDate);
             calendar.innerHTML = '';
 
+            // Day headers
             const dayHeaders = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
             dayHeaders.forEach(day => {
                 const dayHeader = document.createElement('div');
@@ -721,12 +805,14 @@
             const daysInMonth = getDaysInMonth(currentDate);
             const firstDayOfMonth = getFirstDayOfMonth(currentDate);
 
+            // Empty days for month start
             for (let i = 0; i < firstDayOfMonth; i++) {
                 const emptyDay = document.createElement('div');
                 emptyDay.className = 'calendar-day other-month';
                 calendar.appendChild(emptyDay);
             }
 
+            // Days of the month
             for (let day = 1; day <= daysInMonth; day++) {
                 const dayElement = document.createElement('div');
                 dayElement.className = 'calendar-day';
@@ -734,8 +820,10 @@
                 const dayDate = new Date(year, month, day);
                 const dateString = dayDate.toISOString().split('T')[0];
 
+                // Check if day is outside allowed range or Saturday
                 if (dateString < '2025-08-12' || dateString > '2025-09-07' || isSaturday(dayDate)) {
                     dayElement.classList.add('disabled');
+                    dayElement.innerHTML = `<div class="calendar-day-number">${day}</div>`;
                     calendar.appendChild(dayElement);
                     continue;
                 }
@@ -771,6 +859,7 @@
                 createCalendar();
                 resetTimeSelection();
             });
+
             document.getElementById('nextMonthBtn').addEventListener('click', () => {
                 currentDate.setMonth(currentDate.getMonth() + 1);
                 createCalendar();
@@ -778,6 +867,7 @@
             });
         }
 
+        // ======= SELECTION FUNCTIONS =======
         function resetTimeSelection() {
             selectedDate = null;
             selectedTime = null;
@@ -787,14 +877,18 @@
         }
 
         function selectDate(dateString, element) {
+            // Remove previous selection
             document.querySelectorAll('.calendar-day.selected').forEach(el => {
                 el.classList.remove('selected');
             });
 
+            // Select new date
             element.classList.add('selected');
             selectedDate = dateString;
             selectedTime = null;
             selectedSlot = null;
+            
+            // Show time selection
             document.getElementById('timeSelectionGroup').style.display = 'block';
             createTimeSelection();
             document.getElementById('timeSelectionGroup').scrollIntoView({ 
@@ -831,15 +925,19 @@
         }
 
         function selectTime(slot, element) {
+            // Remove previous selection
             document.querySelectorAll('#timesContainer .slot-option.selected').forEach(el => {
                 el.classList.remove('selected');
             });
+            
+            // Select new time
             element.classList.add('selected');
             selectedTime = slot.time;
             selectedSlot = slot;
             document.getElementById('submitBtn').disabled = false;
         }
 
+        // ======= FORM SUBMISSION =======
         document.getElementById('bookingForm').addEventListener('submit', async function(e) {
             e.preventDefault();
 
@@ -854,33 +952,36 @@
             submitBtn.disabled = true;
 
             const formData = {
-                name: document.getElementById('name').value,
-                email: document.getElementById('email').value,
-                phone: document.getElementById('phone').value,
-                notes: document.getElementById('notes').value,
+                name: document.getElementById('name').value.trim(),
+                email: document.getElementById('email').value.trim(),
+                phone: document.getElementById('phone').value.trim(),
+                notes: document.getElementById('notes').value.trim(),
                 selectedSlot: {
                     date: selectedDate,
                     time: selectedTime,
                     formatted: `${formatDate(selectedDate)} um ${selectedTime} Uhr`
-                },
-                timestamp: new Date().toISOString()
+                }
             };
 
             try {
-               
-                selectedSlot.booked = true;
+                // Save to Google Sheets
+                await saveBookingToServer(formData);
+                
+                // Refresh from server to get latest bookings
+                await refreshFromServer();
+
                 showMessage(
-                    `🎉 Erfolgreich gebucht für ${formData.selectedSlot.formatted}. 
-                     Eine Bestätigung wurde an ${formData.email} gesendet.`, 
+                    `🎉 Erfolgreich gebucht für ${formData.selectedSlot.formatted}. Eine Bestätigung wurde an ${formData.email} gesendet.`,
                     'success'
                 );
                 resetInterface();
             } catch (error) {
-                showMessage('❌ Buchung fehlgeschlagen. Bitte versuchen Sie es erneut.', 'error');
                 console.error('Booking error:', error);
+                showMessage('❌ Buchung fehlgeschlagen. Bitte versuchen Sie es erneut.', 'error');
+                submitBtn.disabled = false;
+            } finally {
+                submitBtn.innerHTML = originalText;
             }
-            submitBtn.innerHTML = originalText;
-            submitBtn.disabled = true;
         });
 
         function resetInterface() {
@@ -894,141 +995,18 @@
             document.getElementById('submitBtn').disabled = true;
         }
 
-        <script>
-  // ======= 1) НАСТРОЙКА =======
-  // ВСТАВЬТЕ свой URL Web App из Google Apps Script (обязательно заканчивается на /exec)
-  const GAS_URL = 'https://script.google.com/macros/s/AKfXXXXXXXXXXXXXXXXXXXX/exec';
-
-  // Множество занятых слотов: формат ключа 'YYYY-MM-DD|HH:mm'
-  let bookedSet = new Set();
-
-  // ======= 2) РАБОТА С СЕРВЕРОМ =======
-  // Загрузка всех броней из таблицы (GET ?list=1)
-  async function fetchBookingsFromServer() {
-    const res = await fetch(GAS_URL + '?list=1');
-    const json = await res.json();
-    const rows = json.rows || [];
-    bookedSet = new Set(
-      rows
-        .filter(r => r.visit_date && r.visit_time)
-        .map(r => `${String(r.visit_date).slice(0,10)}|${String(r.visit_time)}`)
-    );
-  }
-
-  // Проставить booked=true в ваших timeSlots на основе bookedSet
-  function syncBookedIntoTimeSlots() {
-    timeSlots.forEach(s => {
-      const key = `${s.date}|${s.time}`;
-      s.booked = bookedSet.has(key);
-    });
-  }
-
-  // Сохранить бронь в Google Sheets (POST, без preflight)
-  async function saveBookingToServer(formData) {
-    const payload = {
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone,
-      notes: formData.notes,
-      visit_date: formData.selectedSlot.date,  // YYYY-MM-DD
-      visit_time: formData.selectedSlot.time   // HH:mm
-    };
-    const res = await fetch(GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' }, // важно: чтобы не было CORS preflight
-      body: JSON.stringify(payload)
-    });
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'Save error');
-    return json;
-  }
-
-  // Общий рефреш: подтянуть брони, отметить занятые, перерисовать календарь
-  async function refreshFromServer() {
-    await fetchBookingsFromServer();
-    syncBookedIntoTimeSlots();
-    createCalendar(); // ваша функция перерисовки календаря
-  }
-
-  // ======= 3) ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ =======
-  document.addEventListener('DOMContentLoaded', async () => {
-    setupCalendarNavigation();     // ваша навигация по месяцам
-    await refreshFromServer();     // сразу подтянем и отключим занятые слоты
-    document.getElementById('submitBtn').disabled = true;
-  });
-
-  // ======= 4) ОБРАБОТЧИК ОТПРАВКИ ФОРМЫ =======
-  // ЗАМЕНИТЕ ваш текущий обработчик submit (или его середину) на этот:
-  document.getElementById('bookingForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-
-    if (!selectedSlot || !selectedDate || !selectedTime) {
-      showMessage('Bitte wählen Sie ein Datum und eine Uhrzeit.', 'error');
-      return;
-    }
-
-    const submitBtn = document.getElementById('submitBtn');
-    const originalText = submitBtn.innerHTML;
-    submitBtn.innerHTML = '<span class="loading"></span>Buchen...';
-    submitBtn.disabled = true;
-
-    const formData = {
-      name: document.getElementById('name').value.trim(),
-      email: document.getElementById('email').value.trim(),
-      phone: document.getElementById('phone').value.trim(),
-      notes: document.getElementById('notes').value.trim(),
-      selectedSlot: {
-        date: selectedDate,
-        time: selectedTime,
-        formatted: `${formatDate(selectedDate)} um ${selectedTime} Uhr`
-      }
-    };
-
-    try {
-      // Пишем в таблицу
-      await saveBookingToServer(formData);
-      // Сразу подтянем актуальные записи и отключим занятый слот
-      await refreshFromServer();
-
-      showMessage(
-        `🎉 Erfolgreich gebucht für ${formData.selectedSlot.formatted}. Eine Bestätigung wurde an ${formData.email} gesendet.`,
-        'success'
-      );
-      resetInterface(); // ваша функция очистки/сброса UI
-    } catch (error) {
-      console.error('Booking error:', error);
-      showMessage('❌ Buchung fehlgeschlagen. Bitte versuchen Sie es erneut.', 'error');
-      submitBtn.disabled = false;
-    } finally {
-      submitBtn.innerHTML = originalText;
-    }
-  });
-        async function loadBookedSlots() {
-            try {
-                const response = await fetch(SCRIPT_URL);
-                const data = await response.json();
-                if (data.ok && data.bookedSlots) {
-            // Отметить слоты как занятые
-                    data.bookedSlots.forEach(slot => {
-                        const slotObj = timeSlots.find(s => s.date === slot.date && s.time === slot.time);
-                        if (slotObj) slotObj.booked = true;
-                    });
-                    console.log(`Загружено ${data.bookedSlots.length} занятых слотов`);
-                }
-            } catch (error) {
-                console.error('Ошибка загрузки слотов:', error);
-            }
-        }
-
+        // ======= ADMIN PANEL =======
         function openAdminPanel() {
             document.getElementById('adminModal').style.display = 'flex';
         }
+
         function closeAdminPanel() {
             document.getElementById('adminModal').style.display = 'none';
             document.getElementById('passwordForm').style.display = 'block';
             document.getElementById('adminContent').style.display = 'none';
             document.getElementById('adminPassword').value = '';
         }
+
         function adminLogin() {
             const password = document.getElementById('adminPassword').value;
             if (password === ADMIN_PASSWORD) {
@@ -1040,28 +1018,35 @@
                 document.getElementById('adminPassword').value = '';
             }
         }
+
         function loadAdminData() {
             updateAdminStats();
             loadBookingsTable();
         }
+
         function updateAdminStats() {
             const today = new Date().toISOString().split('T')[0];
             const todayBookings = bookingsData.filter(booking => 
                 booking.bookingDate.toISOString().split('T')[0] === today
             ).length;
+            
             const totalAvailable = timeSlots.filter(slot => !slot.booked).length;
             const totalBooked = timeSlots.filter(slot => slot.booked).length;
+
             document.getElementById('totalBookings').textContent = bookingsData.length;
             document.getElementById('todayBookings').textContent = todayBookings;
             document.getElementById('availableSlots').textContent = totalAvailable;
             document.getElementById('bookedSlots').textContent = totalBooked;
         }
+
         function loadBookingsTable() {
             const tbody = document.getElementById('bookingsTableBody');
             tbody.innerHTML = '';
+
             const sortedBookings = [...bookingsData].sort((a, b) => 
                 new Date(b.bookingDate) - new Date(a.bookingDate)
             );
+
             sortedBookings.forEach(booking => {
                 const row = document.createElement('tr');
                 row.innerHTML = `
@@ -1074,39 +1059,48 @@
                 `;
                 tbody.appendChild(row);
             });
+
             if (bookingsData.length === 0) {
                 const row = document.createElement('tr');
                 row.innerHTML = '<td colspan="6" style="text-align: center; color: #666;">Noch keine Buchungen</td>';
                 tbody.appendChild(row);
             }
         }
-        function formatDateTime(date) {
-            return new Date(date).toLocaleString('de-DE', {
-                day: '2-digit',
-                month: '2-digit', 
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        }
+
+        // ======= UTILITY FUNCTIONS =======
         function showMessage(text, type) {
             const messageDiv = document.getElementById('message');
             messageDiv.className = type === 'error' ? 'error-message' : 'success-message';
             messageDiv.innerHTML = text;
+            
+            // Auto-hide message after 10 seconds
             setTimeout(() => {
                 messageDiv.innerHTML = '';
                 messageDiv.className = '';
             }, 10000);
         }
 
+        // ======= INITIALIZATION =======
         document.addEventListener('DOMContentLoaded', async function() {
-            // Загружаем занятые слоты с сервера
-            await loadBookedSlots();
-    
-            createCalendar();
             setupCalendarNavigation();
+            
+            // Load existing bookings and refresh interface
+            await refreshFromServer();
+            
             document.getElementById('submitBtn').disabled = true;
+            
+            // Enable Enter key for admin password
+            document.getElementById('adminPassword').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    adminLogin();
+                }
+            });
         });
+
+        // Make admin functions globally available
+        window.openAdminPanel = openAdminPanel;
+        window.closeAdminPanel = closeAdminPanel;
+        window.adminLogin = adminLogin;
     </script>
 </body>
 </html>
