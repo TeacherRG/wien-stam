@@ -867,7 +867,7 @@
             };
 
             try {
-                await simulateBooking(formData);
+               
                 selectedSlot.booked = true;
                 showMessage(
                     `🎉 Erfolgreich gebucht für ${formData.selectedSlot.formatted}. 
@@ -894,33 +894,115 @@
             document.getElementById('submitBtn').disabled = true;
         }
 
-           async function simulateBooking(data) {
-            const response = await fetch(SCRIPT_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain' },
-                body: JSON.stringify(data)
-            });
-    
-            const result = await response.json();
-            if (!result.ok) {
-                throw new Error(result.error || 'Ошибка бронирования');
-            }
-    
-    // Добавляем в локальные данные для админ-панели
-            bookingsData.push({
-                id: Date.now(),
-                bookingDate: new Date(),
-                name: data.name,
-                email: data.email,
-                phone: data.phone,
-                visitDate: data.selectedSlot.date,
-                visitTime: data.selectedSlot.time,
-                notes: data.notes,
-                status: 'confirmed'
-            });
-    
-            return result;
-        }
+        <script>
+  // ======= 1) НАСТРОЙКА =======
+  // ВСТАВЬТЕ свой URL Web App из Google Apps Script (обязательно заканчивается на /exec)
+  const GAS_URL = 'https://script.google.com/macros/s/AKfXXXXXXXXXXXXXXXXXXXX/exec';
+
+  // Множество занятых слотов: формат ключа 'YYYY-MM-DD|HH:mm'
+  let bookedSet = new Set();
+
+  // ======= 2) РАБОТА С СЕРВЕРОМ =======
+  // Загрузка всех броней из таблицы (GET ?list=1)
+  async function fetchBookingsFromServer() {
+    const res = await fetch(GAS_URL + '?list=1');
+    const json = await res.json();
+    const rows = json.rows || [];
+    bookedSet = new Set(
+      rows
+        .filter(r => r.visit_date && r.visit_time)
+        .map(r => `${String(r.visit_date).slice(0,10)}|${String(r.visit_time)}`)
+    );
+  }
+
+  // Проставить booked=true в ваших timeSlots на основе bookedSet
+  function syncBookedIntoTimeSlots() {
+    timeSlots.forEach(s => {
+      const key = `${s.date}|${s.time}`;
+      s.booked = bookedSet.has(key);
+    });
+  }
+
+  // Сохранить бронь в Google Sheets (POST, без preflight)
+  async function saveBookingToServer(formData) {
+    const payload = {
+      name: formData.name,
+      email: formData.email,
+      phone: formData.phone,
+      notes: formData.notes,
+      visit_date: formData.selectedSlot.date,  // YYYY-MM-DD
+      visit_time: formData.selectedSlot.time   // HH:mm
+    };
+    const res = await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' }, // важно: чтобы не было CORS preflight
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || 'Save error');
+    return json;
+  }
+
+  // Общий рефреш: подтянуть брони, отметить занятые, перерисовать календарь
+  async function refreshFromServer() {
+    await fetchBookingsFromServer();
+    syncBookedIntoTimeSlots();
+    createCalendar(); // ваша функция перерисовки календаря
+  }
+
+  // ======= 3) ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ =======
+  document.addEventListener('DOMContentLoaded', async () => {
+    setupCalendarNavigation();     // ваша навигация по месяцам
+    await refreshFromServer();     // сразу подтянем и отключим занятые слоты
+    document.getElementById('submitBtn').disabled = true;
+  });
+
+  // ======= 4) ОБРАБОТЧИК ОТПРАВКИ ФОРМЫ =======
+  // ЗАМЕНИТЕ ваш текущий обработчик submit (или его середину) на этот:
+  document.getElementById('bookingForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    if (!selectedSlot || !selectedDate || !selectedTime) {
+      showMessage('Bitte wählen Sie ein Datum und eine Uhrzeit.', 'error');
+      return;
+    }
+
+    const submitBtn = document.getElementById('submitBtn');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<span class="loading"></span>Buchen...';
+    submitBtn.disabled = true;
+
+    const formData = {
+      name: document.getElementById('name').value.trim(),
+      email: document.getElementById('email').value.trim(),
+      phone: document.getElementById('phone').value.trim(),
+      notes: document.getElementById('notes').value.trim(),
+      selectedSlot: {
+        date: selectedDate,
+        time: selectedTime,
+        formatted: `${formatDate(selectedDate)} um ${selectedTime} Uhr`
+      }
+    };
+
+    try {
+      // Пишем в таблицу
+      await saveBookingToServer(formData);
+      // Сразу подтянем актуальные записи и отключим занятый слот
+      await refreshFromServer();
+
+      showMessage(
+        `🎉 Erfolgreich gebucht für ${formData.selectedSlot.formatted}. Eine Bestätigung wurde an ${formData.email} gesendet.`,
+        'success'
+      );
+      resetInterface(); // ваша функция очистки/сброса UI
+    } catch (error) {
+      console.error('Booking error:', error);
+      showMessage('❌ Buchung fehlgeschlagen. Bitte versuchen Sie es erneut.', 'error');
+      submitBtn.disabled = false;
+    } finally {
+      submitBtn.innerHTML = originalText;
+    }
+  });
         async function loadBookedSlots() {
             try {
                 const response = await fetch(SCRIPT_URL);
