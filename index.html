@@ -562,31 +562,18 @@ grid-template-columns: 1fr 1fr;
 </div>
 
 <script>
-  /* =========================
-     1) НАСТРОЙКА
-  ========================== */
-  // ВСТАВЬТЕ сюда свой URL из Google Apps Script (Deploy → Web app → Web app URL)
-  const GAS_URL = 'https://script.google.com/macros/s/AKfycbxoahujdUthOZrGa1xD_aTsuHhLkL8iWgKfcAnpjHXbrGoSZCPVAB8JDSaexVwsr-zJ/exec';
+  /* === 1) Настройка === */
+  const GAS_URL = 'https://script.google.com/macros/s/АКF.../exec'; // <-- твой /exec
+  const SLOT_TIMES = ['10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00'];
 
-  // Множество занятых слотов: ключ 'YYYY-MM-DD|HH:mm'
-  let bookedSet = new Set();
+  let bookedSet = new Set(); // ключ вида 'YYYY-MM-DD|HH:mm'
 
-  // Эти переменные и функции уже есть у вас в коде календаря:
-  // - timeSlots (массив всех слотов с полем .booked)
-  // - selectedDate, selectedTime, selectedSlot
-  // - createCalendar(), setupCalendarNavigation(), formatDate()
-  // - showMessage(text, type), resetInterface()
-
-  /* =========================
-     2) РАБОТА С СЕРВЕРОМ (GAS)
-  ========================== */
-
-  // GET: получить все брони и собрать bookedSet
+  /* === 2) Работа с сервером === */
   async function fetchBookingsFromServer() {
-    const res = await fetch(GAS_URL + '?list=1'); // простой GET без префлайта
-    // Если ваш doGet отвечает текстом — используем .text() и потом JSON.parse:
-    // const text = await res.text(); const json = JSON.parse(text);
-    const json = await res.json();
+    const res = await fetch(GAS_URL + '?list=1');
+    let json;
+    try { json = await res.json(); }
+    catch { json = JSON.parse(await res.text()); }
     const rows = json.rows || [];
     bookedSet = new Set(
       rows
@@ -595,129 +582,141 @@ grid-template-columns: 1fr 1fr;
     );
   }
 
-  // Проставить .booked=true во все timeSlots по данным из таблицы
-  function syncBookedIntoTimeSlots() {
-    if (!Array.isArray(timeSlots)) return;
-    timeSlots.forEach(s => {
-      const key = `${s.date}|${s.time}`;
-      s.booked = bookedSet.has(key);
-    });
-  }
-
-  // POST: сохранить бронь в Google Sheets
   async function saveBookingToServer(formData) {
     const payload = {
       name: formData.name,
       email: formData.email,
       phone: formData.phone,
       notes: formData.notes,
-      visit_date: formData.selectedSlot.date,  // 'YYYY-MM-DD'
-      visit_time: formData.selectedSlot.time   // 'HH:mm'
+      visit_date: formData.selectedSlot.date,
+      visit_time: formData.selectedSlot.time
     };
-
     const res = await fetch(GAS_URL, {
       method: 'POST',
-      // Важно: text/plain, чтобы браузер не делал CORS preflight (OPTIONS)
-      headers: { 'Content-Type': 'text/plain' },
+      headers: { 'Content-Type': 'text/plain' }, // без preflight
       body: JSON.stringify(payload)
     });
-
-    // Аналогично: если ответ не JSON — можно читать .text() и потом JSON.parse
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'Save error');
-    return json;
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Save error');
+    return data;
   }
 
-  // Общий рефреш: подтянуть таблицу → отметить занятые → перерисовать календарь
   async function refreshFromServer() {
     await fetchBookingsFromServer();
-    syncBookedIntoTimeSlots();
-    if (typeof createCalendar === 'function') createCalendar();
+    createCalendar(); // перерисуем с учётом bookedSet
   }
 
-  /* =========================
-     3) ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ
-  ========================== */
-  document.addEventListener('DOMContentLoaded', async () => {
-    // Навигация по календарю — оставляем как у вас
-    if (typeof setupCalendarNavigation === 'function') setupCalendarNavigation();
+  /* === 3) Помощники === */
+  function availableCount(dateStr) {
+    return SLOT_TIMES.filter(t => !bookedSet.has(`${dateStr}|${t}`)).length;
+  }
 
-    // Сразу подгружаем брони из таблицы и блокируем занятые слоты
-    await refreshFromServer();
+  /* === 4) ЗАМЕНА ваших функций на версии без timeSlots === */
+  function createCalendar() {
+    const calendar = document.getElementById('calendar');
+    const monthLabel = document.getElementById('currentMonth');
+    monthLabel.textContent = formatMonth(currentDate);
+    calendar.innerHTML = '';
 
-    const submitBtn = document.getElementById('submitBtn');
-    if (submitBtn) submitBtn.disabled = true;
-  });
+    const dayHeaders = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+    dayHeaders.forEach(day => {
+      const h = document.createElement('div');
+      h.className = 'calendar-day-header';
+      h.textContent = day;
+      calendar.appendChild(h);
+    });
 
-  /* =========================
-     4) ОБРАБОТЧИК ОТПРАВКИ ФОРМЫ
-  ========================== */
-  // Важно: этот обработчик заменяет вызов simulateBooking(...)
-  const bookingFormEl = document.getElementById('bookingForm');
-  if (bookingFormEl) {
-    bookingFormEl.addEventListener('submit', async function(e) {
-      e.preventDefault();
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const today = new Date(); today.setHours(0,0,0,0);
 
-      if (!window.selectedSlot || !window.selectedDate || !window.selectedTime) {
-        if (typeof showMessage === 'function') {
-          showMessage('Bitte wählen Sie ein Datum und eine Uhrzeit.', 'error');
-        }
-        return;
+    const daysInMonth = getDaysInMonth(currentDate);
+    const firstDayOfMonth = getFirstDayOfMonth(currentDate);
+
+    for (let i = 0; i < firstDayOfMonth; i++) {
+      const emptyDay = document.createElement('div');
+      emptyDay.className = 'calendar-day other-month';
+      calendar.appendChild(emptyDay);
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dayElement = document.createElement('div');
+      dayElement.className = 'calendar-day';
+
+      const dayDate = new Date(year, month, day);
+      const dateString = dayDate.toISOString().split('T')[0];
+
+      // диапазон дат и суббота — как у тебя
+      if (dateString < '2025-08-12' || dateString > '2025-09-07' || isSaturday(dayDate)) {
+        dayElement.classList.add('disabled');
+        calendar.appendChild(dayElement);
+        continue;
       }
 
-      const submitBtn = document.getElementById('submitBtn');
-      const originalText = submitBtn ? submitBtn.innerHTML : '';
-      if (submitBtn) {
-        submitBtn.innerHTML = '<span class="loading"></span>Buchen...';
-        submitBtn.disabled = true;
+      const count = availableCount(dateString);
+      dayElement.innerHTML = `
+        <div class="calendar-day-number">${day}</div>
+        <div class="calendar-day-slots">${count > 0 ? `${count} frei` : 'Belegt'}</div>
+      `;
+
+      if (dayDate < today) {
+        dayElement.classList.add('disabled');
+      } else if (count > 0) {
+        dayElement.classList.add('has-slots');
+        dayElement.addEventListener('click', () => selectDate(dateString, dayElement));
+      } else {
+        dayElement.classList.add('fully-booked');
       }
 
-      const formData = {
-        name: document.getElementById('name')?.value.trim() || '',
-        email: document.getElementById('email')?.value.trim() || '',
-        phone: document.getElementById('phone')?.value.trim() || '',
-        notes: document.getElementById('notes')?.value.trim() || '',
-        selectedSlot: {
-          date: window.selectedDate,
-          time: window.selectedTime,
-          formatted: `${typeof formatDate === 'function' ? formatDate(window.selectedDate) : window.selectedDate} um ${window.selectedTime} Uhr`
-        }
-      };
+      calendar.appendChild(dayElement);
+    }
+  }
 
-      try {
-        // 1) сохраняем бронь в Google Sheets
-        await saveBookingToServer(formData);
+  function createTimeSelection() {
+    const container = document.getElementById('timesContainer');
+    container.innerHTML = '';
+    SLOT_TIMES.forEach(time => {
+      const key = `${selectedDate}|${time}`;
+      const isBooked = bookedSet.has(key);
 
-        // 2) сразу подтягиваем актуальные данные и помечаем слот занятым
-        await refreshFromServer();
+      const timeElement = document.createElement('div');
+      timeElement.className = 'slot-option' + (isBooked ? ' booked' : '');
 
-        if (typeof showMessage === 'function') {
-          showMessage(
-            `🎉 Erfolgreich gebucht für ${formData.selectedSlot.formatted}. Eine Bestätigung wurde an ${formData.email} gesendet.`,
-            'success'
-          );
-        }
-        if (typeof resetInterface === 'function') resetInterface();
-      } catch (error) {
-        console.error('Booking error:', error);
-        if (typeof showMessage === 'function') {
-          showMessage('❌ Buchung fehlgeschlagen. Bitte versuchen Sie es erneut.', 'error');
-        }
-        if (submitBtn) submitBtn.disabled = false;
-      } finally {
-        if (submitBtn) submitBtn.innerHTML = originalText;
+      if (isBooked) {
+        timeElement.innerHTML = `
+          <div><strong>${time}</strong></div>
+          <div><small>❌ Belegt</small></div>
+        `;
+      } else {
+        timeElement.innerHTML = `
+          <div><strong>${time}</strong></div>
+          <div><small>✅ Frei</small></div>
+        `;
+        timeElement.addEventListener('click', () => selectTime({ date: selectedDate, time }, timeElement));
       }
+
+      container.appendChild(timeElement);
     });
   }
 
-  /* =========================
-     5) ЧТО УДАЛИТЬ В ВАШЕМ СТАРОМ КОДЕ
-  ========================== */
-  // - Полностью удалить функцию async function simulateBooking(...) { ... }
-  // - Удалить любые вызовы simulateBooking(...)
-  // - Удалить строку selectedSlot.booked = true; (теперь помечается через refreshFromServer)
-  // - (Опционально) удалить весь код "админки", если не нужен
+  /* === 5) ИНИЦИАЛИЗАЦИЯ === */
+  document.addEventListener('DOMContentLoaded', async () => {
+    setupCalendarNavigation?.();
+    try {
+      await refreshFromServer(); // тянем занятое → рисуем календарь
+    } catch (e) {
+      console.error('refreshFromServer failed:', e);
+      createCalendar(); // хоть без занятых, но нарисуем
+    }
+    document.getElementById('submitBtn').disabled = true;
+  });
+
+  /* === 6) ОБРАБОТЧИК submit (если надо заменить) ===
+     В своём обработчике после успешного saveBookingToServer(formData)
+     просто добавь: await refreshFromServer();
+  */
 </script>
+
 
 </body>
 </html>
