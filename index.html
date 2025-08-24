@@ -566,11 +566,30 @@ grid-template-columns: 1fr 1fr;
    НАСТРОЙКИ
 ========================= */
 // ВСТАВЬ сюда свой Web App URL из Google Apps Script (обязательно /exec на конце)
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbxoahujdUthOZrGa1xD_aTsuHhLkL8iWgKfcAnpjHXbrGoSZCPVAB8JDSaexVwsr-zJ/exec        ';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzBJRh79ujLImd0W5PzlA1moLlwMCryZ0m5brij2r1YMak1tE6Xklj0iHDintErB-ck/exec';
 
 // Разрешённое окно дат (меняй при необходимости)
 const WINDOW_START = '2025-08-12';
 const WINDOW_END   = '2025-09-07';
+const res = await fetch(GAS_URL, {
+  method: 'POST',
+  headers: { 'Content-Type': 'text/plain' },
+  body: JSON.stringify({ action: 'list' })
+});
+const json = await res.json();        // { ok:true, rows:[...] }
+const payload = {
+  action: 'create',
+  name, email, phone, notes,
+  visit_date,  // 'YYYY-MM-DD'
+  visit_time   // 'HH:mm'
+};
+const res = await fetch(GAS_URL, {
+  method: 'POST',
+  headers: { 'Content-Type': 'text/plain' },
+  body: JSON.stringify(payload)
+});
+const json = await res.json();        // { ok:true, emailSent:true/false }
+
 
 // Времена слотов за день
 const SLOT_TIMES = ['10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00'];
