@@ -628,18 +628,28 @@ function formatDate(yyyy_mm_dd){
 /* =========================
    РАБОТА С СЕРВЕРОМ (GAS)
 ========================= */
-async function fetchBookingsFromServer(){
-  const res = await fetch(GAS_URL + '?list=1');
+async function fetchBookingsFromServer() {
+  const res = await fetch(GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ action: 'list' })
+  });
+
   let json;
-  try { json = await res.json(); }
-  catch { json = JSON.parse(await res.text()); }
-  const rows = json.rows || [];
+  try {
+    json = await res.json();
+  } catch {
+    json = JSON.parse(await res.text());
+  }
+
+  const rows = (json && json.rows) || [];
   bookedSet = new Set(
     rows
       .filter(r => r.visit_date && r.visit_time)
       .map(r => `${String(r.visit_date).slice(0,10)}|${String(r.visit_time)}`)
   );
 }
+
 async function saveBookingToServer(formData){
   const payload = {
     name: formData.name,
