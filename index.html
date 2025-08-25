@@ -638,393 +638,357 @@
         </div>
     </div>
 
-    <script>
-        // Hilfsfunktion: ist Samstag?
-        function isSaturday(dateObj) {
-            return dateObj.getDay() === 6; // 0 = Sonntag ... 6 = Samstag
-        }
+   <script>
+// *** Укажите URL вашего Google Apps Script Web App ***
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxydoRSv4vWyj2NXIE-jzIYpEVy9lpj1xY7nA7Hf6_pMzHYhSweHmXHvnQUwaHOCzUC/exec';
 
-        // Generierung der Slots für den Bereich (12.08.2025–07.09.2025, außer Samstag)
-        function generateTimeSlots() {
-            const start = new Date('2025-08-12');
-            const end = new Date('2025-09-07');
-            const slotTimes = ['10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00'];
-            let slots = [];
-            
-            for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-                if (isSaturday(d)) continue;
-                const dateStr = d.toISOString().split('T')[0];
-                slotTimes.forEach(time => {
-                    slots.push({ date: dateStr, time: time, booked: false });
-                });
-            }
-            return slots;
-        }
+// Глобальные переменные
+let selectedDate = null;
+let selectedTime = null;
+let currentDate = new Date('2025-08-12');
+let bookedSlots = new Set(); // Множество занятых слотов
 
-        const timeSlots = generateTimeSlots();
-
-        let selectedDate = null;
-        let selectedTime = null;
-        let selectedSlot = null;
-        let currentDate = new Date('2025-08-01');
-        let bookingsData = [];
-        const ADMIN_PASSWORD = 'tefillin2025';
-        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxoahujdUthOZrGa1xD_aTsuHhLkL8iWgKfcAnpjHXbrGoSZCPVAB8JDSaexVwsr-zJ/exec';
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            const options = { 
-                weekday: 'short', 
-                day: '2-digit', 
-                month: '2-digit',
-                year: 'numeric'
-            };
-            return date.toLocaleDateString('de-DE', options);
-        }
-
-        function formatMonth(date) {
-            const options = { month: 'long', year: 'numeric' };
-            return date.toLocaleDateString('de-DE', options);
-        }
-
-        function getDaysInMonth(date) {
-            return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-        }
-
-        function getFirstDayOfMonth(date) {
-            const firstDay = new Date(date.getFullYear(), date.getMonth(), 1).getDay();
-            return firstDay === 0 ? 6 : firstDay - 1;
-        }
-
-        function getSlotsForDate(dateString) {
-            return timeSlots.filter(slot => slot.date === dateString);
-        }
-
-        function createCalendar() {
-            const calendar = document.getElementById('calendar');
-            const monthLabel = document.getElementById('currentMonth');
-            monthLabel.textContent = formatMonth(currentDate);
-            calendar.innerHTML = '';
-
-            const dayHeaders = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
-            dayHeaders.forEach(day => {
-                const dayHeader = document.createElement('div');
-                dayHeader.className = 'calendar-day-header';
-                dayHeader.textContent = day;
-                calendar.appendChild(dayHeader);
-            });
-
-            const year = currentDate.getFullYear();
-            const month = currentDate.getMonth();
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-
-            const daysInMonth = getDaysInMonth(currentDate);
-            const firstDayOfMonth = getFirstDayOfMonth(currentDate);
-
-            for (let i = 0; i < firstDayOfMonth; i++) {
-                const emptyDay = document.createElement('div');
-                emptyDay.className = 'calendar-day other-month';
-                calendar.appendChild(emptyDay);
-            }
-
-            for (let day = 1; day <= daysInMonth; day++) {
-                const dayElement = document.createElement('div');
-                dayElement.className = 'calendar-day';
-
-                const dayDate = new Date(year, month, day);
-                const dateString = dayDate.toISOString().split('T')[0];
-
-                if (dateString < '2025-08-12' || dateString > '2025-09-07' || isSaturday(dayDate)) {
-                    dayElement.classList.add('disabled');
-                    calendar.appendChild(dayElement);
-                    continue;
-                }
-
-                const slotsForDate = getSlotsForDate(dateString);
-                const availableSlots = slotsForDate.filter(slot => !slot.booked);
-
-                dayElement.innerHTML = `
-                    <div class="calendar-day-number">${day}</div>
-                    <div class="calendar-day-slots">${availableSlots.length > 0 ? `${availableSlots.length} frei` : ''}</div>
-                `;
-
-                if (dayDate < today) {
-                    dayElement.classList.add('disabled');
-                } else if (availableSlots.length > 0) {
-                    dayElement.classList.add('has-slots');
-                    dayElement.addEventListener('click', () => selectDate(dateString, dayElement));
-                } else if (slotsForDate.length > 0) {
-                    dayElement.classList.add('fully-booked');
-                    dayElement.innerHTML = `
-                        <div class="calendar-day-number">${day}</div>
-                        <div class="calendar-day-slots">Belegt</div>
-                    `;
-                }
-
-                calendar.appendChild(dayElement);
-            }
-        }
-
-        function setupCalendarNavigation() {
-            document.getElementById('prevMonthBtn').addEventListener('click', () => {
-                currentDate.setMonth(currentDate.getMonth() - 1);
-                createCalendar();
-                resetTimeSelection();
-            });
-            document.getElementById('nextMonthBtn').addEventListener('click', () => {
-                currentDate.setMonth(currentDate.getMonth() + 1);
-                createCalendar();
-                resetTimeSelection();
-            });
-        }
-
-        function resetTimeSelection() {
-            selectedDate = null;
-            selectedTime = null;
-            selectedSlot = null;
-            document.getElementById('timeSelectionGroup').style.display = 'none';
-            document.getElementById('submitBtn').disabled = true;
-        }
-
-        function selectDate(dateString, element) {
-            document.querySelectorAll('.calendar-day.selected').forEach(el => {
-                el.classList.remove('selected');
-            });
-
-            element.classList.add('selected');
-            selectedDate = dateString;
-            selectedTime = null;
-            selectedSlot = null;
-            document.getElementById('timeSelectionGroup').style.display = 'block';
-            createTimeSelection();
-            document.getElementById('timeSelectionGroup').scrollIntoView({ 
-                behavior: 'smooth', 
-                block: 'nearest' 
-            });
-            document.getElementById('submitBtn').disabled = true;
-        }
-
-        function createTimeSelection() {
-            const container = document.getElementById('timesContainer');
-            container.innerHTML = '';
-            const timesForDate = getSlotsForDate(selectedDate);
-
-            timesForDate.forEach(slot => {
-                const timeElement = document.createElement('div');
-                timeElement.className = 'slot-option';
-
-                if (slot.booked) {
-                    timeElement.className += ' booked';
-                    timeElement.innerHTML = `
-                        <div><strong>${slot.time}</strong></div>
-                        <div><small>❌ Belegt</small></div>
-                    `;
-                } else {
-                    timeElement.innerHTML = `
-                        <div><strong>${slot.time}</strong></div>
-                        <div><small>✅ Frei</small></div>
-                    `;
-                    timeElement.addEventListener('click', () => selectTime(slot, timeElement));
-                }
-                container.appendChild(timeElement);
-            });
-        }
-
-        function selectTime(slot, element) {
-            document.querySelectorAll('#timesContainer .slot-option.selected').forEach(el => {
-                el.classList.remove('selected');
-            });
-            element.classList.add('selected');
-            selectedTime = slot.time;
-            selectedSlot = slot;
-            document.getElementById('submitBtn').disabled = false;
-        }
-
-        document.getElementById('bookingForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-
-            if (!selectedSlot || !selectedDate || !selectedTime) {
-                showMessage('Bitte wählen Sie ein Datum und eine Uhrzeit.', 'error');
-                return;
-            }
-
-            const submitBtn = document.getElementById('submitBtn');
-            const originalText = submitBtn.innerHTML;
-            submitBtn.innerHTML = '<span class="loading"></span>Buchen...';
-            submitBtn.disabled = true;
-
-            const formData = {
-                name: document.getElementById('name').value,
-                email: document.getElementById('email').value,
-                phone: document.getElementById('phone').value,
-                notes: document.getElementById('notes').value,
-                selectedSlot: {
-                    date: selectedDate,
-                    time: selectedTime,
-                    formatted: `${formatDate(selectedDate)} um ${selectedTime} Uhr`
-                },
-                timestamp: new Date().toISOString()
-            };
-
-            try {
-                await simulateBooking(formData);
-                selectedSlot.booked = true;
-                showMessage(
-                    `🎉 Erfolgreich gebucht für ${formData.selectedSlot.formatted}. 
-                     Eine Bestätigung wurde an ${formData.email} gesendet.`, 
-                    'success'
-                );
-                resetInterface();
-            } catch (error) {
-                showMessage('❌ Buchung fehlgeschlagen. Bitte versuchen Sie es erneut.', 'error');
-                console.error('Booking error:', error);
-            }
-            submitBtn.innerHTML = originalText;
-            submitBtn.disabled = true;
+// Генерация всех слотов в диапазоне дат (12.08.2025 - 07.09.2025, исключая субботы)
+function generateTimeSlots() {
+    const start = new Date('2025-08-12');
+    const end = new Date('2025-09-07');
+    const times = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+    const slots = [];
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        if (d.getDay() === 6) continue; // пропускаем субботы
+        const dateStr = d.toISOString().split('T')[0];
+        times.forEach(time => {
+            slots.push({ date: dateStr, time: time });
         });
+    }
+    return slots;
+}
+const timeSlots = generateTimeSlots();
 
-        function resetInterface() {
-            document.getElementById('bookingForm').reset();
-            selectedDate = null;
-            selectedTime = null;
-            selectedSlot = null;
-            document.getElementById('timeSelectionGroup').style.display = 'none';
-            createCalendar();
-            document.getElementById('timesContainer').innerHTML = '';
-            document.getElementById('submitBtn').disabled = true;
+// Загрузка занятых слотов с сервера (POST запрос с action='list')
+async function loadBookedSlots() {
+    try {
+        console.log('📡 Загружаем занятые слоты...');
+        const response = await fetch(SCRIPT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'list' })
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
         }
-
-           async function simulateBooking(data) {
-            const response = await fetch(SCRIPT_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
+        const data = await response.json();
+        console.log('📊 Ответ сервера:', data);
+        if (data.ok && data.bookedSlots) {
+            bookedSlots.clear();
+            data.bookedSlots.forEach(slot => {
+                // Сохраняем занятые слоты в виде "YYYY-MM-DD_HH:MM"
+                bookedSlots.add(`${slot.date}_${slot.time}`);
             });
-    
-            const result = await response.json();
-            if (!result.ok) {
-                throw new Error(result.error || 'Ошибка бронирования');
-            }
-    
-    // Добавляем в локальные данные для админ-панели
-            bookingsData.push({
-                id: Date.now(),
-                bookingDate: new Date(),
-                name: data.name,
-                email: data.email,
-                phone: data.phone,
-                visitDate: data.selectedSlot.date,
-                visitTime: data.selectedSlot.time,
-                notes: data.notes,
-                status: 'confirmed'
-            });
-    
-            return result;
+            console.log('✅ Загружено занятых слотов:', bookedSlots.size);
         }
-        async function loadBookedSlots() {
-            try {
-                const response = await fetch(SCRIPT_URL);
-                const data = await response.json();
-                if (data.ok && data.bookedSlots) {
-            // Отметить слоты как занятые
-                    data.bookedSlots.forEach(slot => {
-                        const slotObj = timeSlots.find(s => s.date === slot.date && s.time === slot.time);
-                        if (slotObj) slotObj.booked = true;
-                    });
-                    console.log(`Загружено ${data.bookedSlots.length} занятых слотов`);
-                }
-            } catch (error) {
-                console.error('Ошибка загрузки слотов:', error);
-            }
-        }
+    } catch (error) {
+        console.error('❌ Ошибка загрузки слотов:', error);
+        // Показываем предупреждение пользователю, не прерывая работу
+        showMessage('⚠️ Nicht alle aktuellen Daten konnten geladen werden. Es werden alle verfügbaren Zeiten angezeigt.', 'error');
+    }
+}
 
-        function openAdminPanel() {
-            document.getElementById('adminModal').style.display = 'flex';
-        }
-        function closeAdminPanel() {
-            document.getElementById('adminModal').style.display = 'none';
-            document.getElementById('passwordForm').style.display = 'block';
-            document.getElementById('adminContent').style.display = 'none';
-            document.getElementById('adminPassword').value = '';
-        }
-        function adminLogin() {
-            const password = document.getElementById('adminPassword').value;
-            if (password === ADMIN_PASSWORD) {
-                document.getElementById('passwordForm').style.display = 'none';
-                document.getElementById('adminContent').style.display = 'block';
-                loadAdminData();
+// Проверка, занят ли слот
+function isSlotBooked(date, time) {
+    return bookedSlots.has(`${date}_${time}`);
+}
+
+// Форматирование даты (например, "Mo, 12.08.2025")
+function formatDate(dateString) {
+    const date = new Date(dateString + 'T00:00:00');
+    return date.toLocaleDateString('de-DE', {
+        weekday: 'short',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+    });
+}
+
+// Форматирование месяца (например, "August 2025")
+function formatMonth(date) {
+    return date.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+}
+
+function getDaysInMonth(date) {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+}
+
+function getFirstDayOfMonth(date) {
+    const firstDay = new Date(date.getFullYear(), date.getMonth(), 1).getDay();
+    return firstDay === 0 ? 6 : firstDay - 1; // приводим к формату: Пн = 0, ..., Вс = 6
+}
+
+// Получение всех слотов для конкретной даты
+function getSlotsForDate(dateString) {
+    return timeSlots.filter(slot => slot.date === dateString);
+}
+
+// Создание календаря на текущий месяц
+function createCalendar() {
+    const calendar = document.getElementById('calendar');
+    const monthLabel = document.getElementById('currentMonth');
+    monthLabel.textContent = formatMonth(currentDate);
+    calendar.innerHTML = '';
+
+    // Заголовки дней недели
+    const dayHeaders = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+    dayHeaders.forEach(day => {
+        const dayHeader = document.createElement('div');
+        dayHeader.className = 'calendar-day-header';
+        dayHeader.textContent = day;
+        calendar.appendChild(dayHeader);
+    });
+
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const daysInMonth = getDaysInMonth(currentDate);
+    const firstDayOfMonth = getFirstDayOfMonth(currentDate);
+
+    // Пустые ячейки перед началом месяца (для выравнивания дня недели)
+    for (let i = 0; i < firstDayOfMonth; i++) {
+        const emptyDay = document.createElement('div');
+        emptyDay.className = 'calendar-day other-month';
+        calendar.appendChild(emptyDay);
+    }
+
+    // Ячейки дней текущего месяца
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dayElement = document.createElement('div');
+        dayElement.className = 'calendar-day';
+        const dayDate = new Date(year, month, day);
+        const dateString = dayDate.toISOString().split('T')[0];
+
+        if (dateString < '2025-08-12' || dateString > '2025-09-07' || dayDate.getDay() === 6) {
+            // Дата вне диапазона или суббота — недоступна для брони
+            dayElement.classList.add('disabled');
+            dayElement.innerHTML = `<div class="calendar-day-number">${day}</div>`;
+        } else {
+            const slotsForDate = getSlotsForDate(dateString);
+            const availableSlots = slotsForDate.filter(slot => !isSlotBooked(slot.date, slot.time));
+            // Отображаем количество свободных слотов или отметку "Belegt"
+            dayElement.innerHTML = `
+                <div class="calendar-day-number">${day}</div>
+                <div class="calendar-day-slots">${availableSlots.length > 0 ? `${availableSlots.length} frei` : 'Belegt'}</div>
+            `;
+            if (dayDate < today) {
+                // Прошедшие даты неактивны
+                dayElement.classList.add('disabled');
+            } else if (availableSlots.length > 0) {
+                // Есть свободные слоты – дата доступна для выбора
+                dayElement.classList.add('has-slots');
+                dayElement.addEventListener('click', () => selectDate(dateString, dayElement));
             } else {
-                alert('❌ Falsches Passwort!');
-                document.getElementById('adminPassword').value = '';
+                // Слотов нет – дата полностью забронирована
+                dayElement.classList.add('fully-booked');
             }
         }
-        function loadAdminData() {
-            updateAdminStats();
-            loadBookingsTable();
-        }
-        function updateAdminStats() {
-            const today = new Date().toISOString().split('T')[0];
-            const todayBookings = bookingsData.filter(booking => 
-                booking.bookingDate.toISOString().split('T')[0] === today
-            ).length;
-            const totalAvailable = timeSlots.filter(slot => !slot.booked).length;
-            const totalBooked = timeSlots.filter(slot => slot.booked).length;
-            document.getElementById('totalBookings').textContent = bookingsData.length;
-            document.getElementById('todayBookings').textContent = todayBookings;
-            document.getElementById('availableSlots').textContent = totalAvailable;
-            document.getElementById('bookedSlots').textContent = totalBooked;
-        }
-        function loadBookingsTable() {
-            const tbody = document.getElementById('bookingsTableBody');
-            tbody.innerHTML = '';
-            const sortedBookings = [...bookingsData].sort((a, b) => 
-                new Date(b.bookingDate) - new Date(a.bookingDate)
-            );
-            sortedBookings.forEach(booking => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${formatDateTime(booking.bookingDate)}</td>
-                    <td><strong>${booking.name}</strong></td>
-                    <td><a href="mailto:${booking.email}">${booking.email}</a></td>
-                    <td>${booking.phone || 'Nicht angegeben'}</td>
-                    <td><strong>${formatDate(booking.visitDate)} um ${booking.visitTime} Uhr</strong></td>
-                    <td>${booking.notes || 'Keine'}</td>
-                `;
-                tbody.appendChild(row);
-            });
-            if (bookingsData.length === 0) {
-                const row = document.createElement('tr');
-                row.innerHTML = '<td colspan="6" style="text-align: center; color: #666;">Noch keine Buchungen</td>';
-                tbody.appendChild(row);
-            }
-        }
-        function formatDateTime(date) {
-            return new Date(date).toLocaleString('de-DE', {
-                day: '2-digit',
-                month: '2-digit', 
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        }
-        function showMessage(text, type) {
-            const messageDiv = document.getElementById('message');
-            messageDiv.className = type === 'error' ? 'error-message' : 'success-message';
-            messageDiv.innerHTML = text;
-            setTimeout(() => {
-                messageDiv.innerHTML = '';
-                messageDiv.className = '';
-            }, 10000);
-        }
+        calendar.appendChild(dayElement);
+    }
+}
 
-        document.addEventListener('DOMContentLoaded', async function() {
-            // Загружаем занятые слоты с сервера
-            await loadBookedSlots();
-    
-            createCalendar();
-            setupCalendarNavigation();
-            document.getElementById('submitBtn').disabled = true;
+// Настройка кнопок навигации по месяцам
+function setupCalendarNavigation() {
+    document.getElementById('prevMonthBtn').addEventListener('click', () => {
+        currentDate.setMonth(currentDate.getMonth() - 1);
+        createCalendar();
+        resetTimeSelection();
+    });
+    document.getElementById('nextMonthBtn').addEventListener('click', () => {
+        currentDate.setMonth(currentDate.getMonth() + 1);
+        createCalendar();
+        resetTimeSelection();
+    });
+}
+
+// Сброс выбора времени (скрыть и отключить секцию выбора времени)
+function resetTimeSelection() {
+    selectedDate = null;
+    selectedTime = null;
+    document.getElementById('timeSelectionGroup').style.display = 'none';
+    document.getElementById('submitBtn').disabled = true;
+}
+
+// Выбор даты в календаре
+function selectDate(dateString, element) {
+    // Убираем предыдущую выделенную дату
+    document.querySelectorAll('.calendar-day.selected').forEach(el => {
+        el.classList.remove('selected');
+    });
+    // Подсвечиваем выбранную дату
+    element.classList.add('selected');
+    selectedDate = dateString;
+    selectedTime = null;
+    // Показываем секцию выбора времени
+    document.getElementById('timeSelectionGroup').style.display = 'block';
+    createTimeSelection();
+    // Прокручиваем к секции времени для удобства
+    document.getElementById('timeSelectionGroup').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Пока не выбрано время, кнопку отправки держим отключённой
+    document.getElementById('submitBtn').disabled = true;
+}
+
+// Создание списка временных слотов для выбранной даты
+function createTimeSelection() {
+    const container = document.getElementById('timesContainer');
+    container.innerHTML = '';
+    const slotsForDate = getSlotsForDate(selectedDate);
+    slotsForDate.forEach(slot => {
+        const timeElement = document.createElement('div');
+        timeElement.className = 'slot-option';
+        if (isSlotBooked(slot.date, slot.time)) {
+            // Занятый слот: помечаем и не даём выбрать
+            timeElement.classList.add('booked');
+            timeElement.innerHTML = `
+                <div><strong>${slot.time}</strong></div>
+                <div><small>❌ Belegt</small></div>
+            `;
+            // Не добавляем обработчик клика, т.е. слот неактивен
+        } else {
+            // Свободный слот: делаем кликабельным
+            timeElement.innerHTML = `
+                <div><strong>${slot.time}</strong></div>
+                <div><small>✅ Frei</small></div>
+            `;
+            timeElement.addEventListener('click', () => selectTime(slot.time, timeElement));
+        }
+        container.appendChild(timeElement);
+    });
+}
+
+// Выбор конкретного времени
+function selectTime(time, element) {
+    // Убираем предыдущий выбор времени
+    document.querySelectorAll('#timesContainer .slot-option.selected').forEach(el => {
+        el.classList.remove('selected');
+    });
+    // Подсвечиваем выбранный слот времени
+    element.classList.add('selected');
+    selectedTime = time;
+    // Активируем кнопку отправки формы, раз дата и время выбраны
+    document.getElementById('submitBtn').disabled = false;
+}
+
+// Отправка данных бронирования на сервер (Google Apps Script)
+async function submitBooking(formData) {
+    try {
+        const response = await fetch(SCRIPT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: JSON.stringify(formData)  // formData уже содержит action и все поля
         });
-    </script>
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const result = await response.json();
+        console.log('📊 Результат бронирования:', result);
+        if (!result.ok) {
+            // Сервер вернул ошибку бронирования (например, слот уже занят)
+            throw new Error(result.error || 'Unknown error');
+        }
+        return result;
+    } catch (error) {
+        console.error('❌ Ошибка отправки бронирования:', error);
+        throw error;
+    }
+}
+
+// Обработка отправки формы бронирования
+document.getElementById('bookingForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    // Проверяем, выбраны ли дата и время
+    if (!selectedDate || !selectedTime) {
+        showMessage('Bitte wählen Sie ein Datum und eine Uhrzeit.', 'error');
+        return;
+    }
+    const submitBtn = document.getElementById('submitBtn');
+    const originalText = submitBtn.innerHTML;
+    // Показываем индикатор загрузки на кнопке
+    submitBtn.innerHTML = '<span class="loading"></span>Buchen...';
+    submitBtn.disabled = true;
+    // Формируем данные для отправки, включая действие 'create'
+    const formData = {
+        action: 'create',
+        name: document.getElementById('name').value,
+        email: document.getElementById('email').value,
+        phone: document.getElementById('phone').value,
+        notes: document.getElementById('notes').value,
+        selectedSlot: {
+            date: selectedDate,
+            time: selectedTime,
+            formatted: `${formatDate(selectedDate)} um ${selectedTime} Uhr`
+        },
+        timestamp: new Date().toISOString()
+    };
+    try {
+        // Отправляем данные на сервер и ждём результата
+        await submitBooking(formData);
+        // Если успех – добавляем данный слот в локальный список занятых
+        bookedSlots.add(`${selectedDate}_${selectedTime}`);
+        // Показываем пользователю сообщение об успешном бронировании
+        showMessage(
+            `🎉 Erfolgreich gebucht für ${formData.selectedSlot.formatted}.\nEine Bestätigung wurde an ${formData.email} gesendet.`,
+            'success'
+        );
+        // Сброс формы и интерфейса после успешного бронирования
+        document.getElementById('bookingForm').reset();
+        resetTimeSelection();
+        createCalendar(); // Обновляем календарь, теперь новый слот будет помечен как занят
+    } catch (error) {
+        // Формируем сообщение об ошибке для пользователя
+        let errorMessage = '❌ Buchung fehlgeschlagen. ';
+        if (error.message.includes('HTTP')) {
+            errorMessage += 'Server-Fehler. ';
+        } else if (error.message.includes('bereits belegt') || error.message.includes('занят')) {
+            // Если текст ошибки указывает на занятость слота (может прийти на разных языках)
+            errorMessage += 'Dieser Termin ist bereits belegt. ';
+        } else {
+            errorMessage += 'Unbekannter Fehler. ';
+        }
+        errorMessage += 'Bitte versuchen Sie es erneut.';
+        showMessage(errorMessage, 'error');
+    } finally {
+        // Восстанавливаем текст кнопки и блокируем её (повторная отправка невозможна без нового выбора)
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = true;
+    }
+});
+
+// Функция показа сообщений пользователю
+function showMessage(text, type) {
+    const messageDiv = document.getElementById('message');
+    messageDiv.className = (type === 'error') ? 'error-message' : 'success-message';
+    // Переносы строк \n заменяем на <br> для отображения в HTML
+    messageDiv.innerHTML = text.replace(/\n/g, '<br>');
+    // Через 8 секунд очищаем сообщение
+    setTimeout(() => {
+        messageDiv.innerHTML = '';
+        messageDiv.className = '';
+    }, 8000);
+}
+
+// Инициализация приложения после загрузки DOM
+document.addEventListener('DOMContentLoaded', async function() {
+    console.log('🚀 Initialisierung des Buchungssystems...');
+    // 1. Загрузка занятых слотов с сервера и заполнение bookedSlots
+    await loadBookedSlots();
+    // 2. Построение календаря текущего месяца на основе полученных данных
+    createCalendar();
+    // 3. Настройка навигации по месяцам
+    setupCalendarNavigation();
+    // 4. Кнопка "Termin buchen" пока отключена (активируется после выбора слота)
+    document.getElementById('submitBtn').disabled = true;
+    console.log('✅ Buchungssystem bereit.');
+});
+</script>
+
 </body>
 </html>
